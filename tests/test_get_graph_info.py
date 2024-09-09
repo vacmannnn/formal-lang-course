@@ -1,5 +1,3 @@
-import pytest
-import networkx as nx
 from project.task1 import GraphInfo, load_graph_info
 
 
