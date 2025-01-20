@@ -2,7 +2,7 @@ import pytest
 import cfpq_data
 import networkx
 import pydot
-from project.task1 import create_and_save_labeled_two_cycled_graph
+from project.task1_graph_utils import create_and_save_labeled_two_cycled_graph
 
 
 def test_creating_and_saving():

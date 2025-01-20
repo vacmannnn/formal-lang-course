@@ -1,4 +1,4 @@
-from project.task1 import GraphInfo, load_graph_info
+from project.task1_graph_utils import GraphInfo, load_graph_info
 
 
 def test_get_graph_info():
