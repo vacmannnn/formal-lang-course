@@ -1,8 +1,9 @@
+import itertools
+
 import numpy as np
 from networkx import MultiDiGraph
-from pyformlang.finite_automaton import Symbol
-from functools import reduce
-from scipy.sparse import csr_matrix
+from scipy.sparse import lil_array, vstack
+
 from project.task2_regex import regex_to_dfa, graph_to_nfa
 from project.task3_adjacency_matrix import AdjacencyMatrixFA
 
@@ -10,64 +11,56 @@ from project.task3_adjacency_matrix import AdjacencyMatrixFA
 def ms_bfs_based_rpq(
     regex: str, graph: MultiDiGraph, start_nodes: set[int], final_nodes: set[int]
 ) -> set[tuple[int, int]]:
-    adj_by_regex = AdjacencyMatrixFA(regex_to_dfa(regex))
-    adj_matrix_nfa = AdjacencyMatrixFA(graph_to_nfa(graph, start_nodes, final_nodes))
+    all_nodes = {int(n) for n in graph.nodes}
+    start_nodes = start_nodes if start_nodes else all_nodes
+    final_nodes = final_nodes if final_nodes else all_nodes
 
-    transposed_matricies: dict[Symbol, csr_matrix] = {}
-    for symbol, matrix in adj_by_regex.matricies.items():
-        transposed_matricies[symbol] = matrix.transpose()
+    nfa = AdjacencyMatrixFA(graph_to_nfa(graph, start_nodes, final_nodes))
+    dfa = AdjacencyMatrixFA(regex_to_dfa(regex))
 
-    dfa_total_states = adj_by_regex.states_count
-    dfa_initial_state = list(adj_by_regex.start_states)[0]
-    nfa_initial_states = adj_matrix_nfa.start_states
-    nfa_initial_count = len(nfa_initial_states)
+    starts = list(start_nodes)
+    dfa_start = next(iter(dfa.start_states))
 
-    initial_data = np.ones(nfa_initial_count, dtype=bool)
-    row_indices = [
-        dfa_initial_state + dfa_total_states * i for i in range(nfa_initial_count)
-    ]
-    col_indices = [state for state in nfa_initial_states]
-    front = csr_matrix(
-        (initial_data, (row_indices, col_indices)),
-        shape=(dfa_total_states * nfa_initial_count, adj_matrix_nfa.states_count),
-        dtype=bool,
-    )
-    visited_states = front
-    common_symbols = adj_by_regex.matricies.keys() & adj_matrix_nfa.matricies.keys()
+    front_st = []
+    for st in starts:
+        fr = lil_array((dfa.states_count, nfa.states_count), dtype=np.bool_)
+        fr[dfa_start, nfa.states[st]] = True
+        front_st.append(fr)
 
-    while front.count_nonzero() != 0:
-        next_fronts = {}
-        for symbol in common_symbols:
-            next_fronts[symbol] = front @ adj_matrix_nfa.matricies[symbol]
+    front = vstack(front_st, format="csr")
+    visited = front.copy()
 
-            for idx in range(len(nfa_initial_states)):
-                start_idx = idx * dfa_total_states
-                end_idx = (idx + 1) * dfa_total_states
+    symbols = nfa.matricies.keys() & dfa.matricies.keys()
+    dfa_transposed = {sym: dfa.matricies[sym].T.tocsr() for sym in symbols}
 
-                next_fronts[symbol][start_idx:end_idx] = (
-                    transposed_matricies[symbol]
-                    @ next_fronts[symbol][start_idx:end_idx]
+    while front.nnz:
+        sym_fronts = []
+        for sym in symbols:
+            new_front = front @ nfa.matricies[sym]
+            sym_fronts.append(
+                vstack(
+                    [
+                        dfa_transposed[sym]
+                        @ new_front[dfa.states_count * i : dfa.states_count * (i + 1)]
+                        for i in range(len(starts))
+                    ],
+                    format="csr",
                 )
+            )
 
-        front = reduce(lambda x, y: x + y, next_fronts.values(), front)
-        front = front > visited_states
-        visited_states += front
+        if not sym_fronts:
+            break
 
-    reversed_nfa_states = {v: k for k, v in adj_matrix_nfa.states.items()}
-    res = set()
+        front = sum(sym_fronts) > visited
+        visited = visited + front
 
-    for dfa_final_state in adj_by_regex.final_states:
-        for idx, nfa_start in enumerate(nfa_initial_states):
-            reachable_states = visited_states.getrow(
-                dfa_total_states * idx + dfa_final_state
-            ).indices
-            for reached_state in reachable_states:
-                if reached_state in adj_matrix_nfa.final_states:
-                    res.add(
-                        (
-                            reversed_nfa_states[nfa_start],
-                            reversed_nfa_states[reached_state],
-                        )
-                    )
+    result = set()
+    for st_idx, st in enumerate(starts):
+        visited_st = visited[
+            dfa.states_count * st_idx : dfa.states_count * (st_idx + 1)
+        ]
+        for dfa_fi, fi in itertools.product(dfa.final_states, final_nodes):
+            if fi in nfa.states and visited_st[dfa_fi, nfa.states[fi]]:
+                result.add((st, fi))
 
-    return res
+    return result
