@@ -73,15 +73,15 @@ class AdjacencyMatrixFA:
         if not self.matricies:
             return reach
 
-        result: sp.csr_matrix = reach.copy()
-        result += sum(self.matricies.values(), sp.csr_matrix(result.shape))
-
-        for mid in range(self.states_count):
-            for src in range(self.states_count):
-                for dest in range(self.states_count):
-                    result[src, dest] = result[src, dest] or (
-                        result[src, mid] and result[mid, dest]
-                    )
+        result = reach + sum(
+            self.matricies.values(), sp.csr_matrix(reach.shape, dtype=bool)
+        )
+        while True:
+            new = result @ result
+            new = sp.csr_matrix(new, dtype=bool)
+            if new.nnz == result.nnz:
+                break
+            result = new
 
         return result
 
